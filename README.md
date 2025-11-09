@@ -1,9 +1,9 @@
 # ECDSA Signature Weakness Analyzer (reuse / near-reuse)
 
 A fast, scriptable tool to **scan ECDSA (secp256k1) signatures** for RNG mistakes:
-- **exact nonce reuse** (`k` reused → identical `r`)
-- **near-reuse** (very similar `r` values → likely `k1 ≈ k2`)
-- quick **pairwise recovery attempts** of the private key `d` when feasible
+- **Exact nonce reuse** (`k` reused → identical `r`)
+- **Near-reuse** (very similar `r` values → likely `k₁ ≈ k₂`)
+- **Pairwise recovery attempts** of the private key `d` when feasible
 
 Designed for educational research on weak RNG scenarios (Bitcoin-style signatures).  
 **Do not use on data you don’t own.**
@@ -32,11 +32,11 @@ Designed for educational research on weak RNG scenarios (Bitcoin-style signature
     txid = ...
     ----------------------------------
     ```
-  - **CSV in one line**:
+  - **CSV one-liners**:
     ```
     <address>,<r>,<s>,<z>,<txid>
     ```
-  - The parser **skips** helper lines like `Podatności: ...`, `SIGHASH_FLAG`, `ratio ≈ ...` etc.
+  - The parser **skips** helper lines like `Podatności: ...`, `SIGHASH_FLAG`, `ratio ≈ ...`, comments, long dashed separators, etc.
 
 - **Owner grouping** (by `address` or `pubkey`) so signatures from different owners don’t mix.
 - **Sampling**: analyze only a fraction of a huge file (`--sample 0.10` = 10%) to speed up.
@@ -68,7 +68,7 @@ Python 3.8+
 
 ecdsa (pip install ecdsa)
 
-The script uses only standard library + ecdsa. No SciPy/NumPy required.
+The script uses only the standard library + ecdsa. No SciPy/NumPy required.
 
 🧾 Input File — Examples
 
@@ -103,150 +103,31 @@ Lines like Podatności: ..., SIGHASH_FLAG = ..., or comments are automatically i
 🧩 What It Detects
 1) Exact nonce reuse (k reused)
 
-For ECDSA over secp256k1:
+For ECDSA over secp256k1, with group order n and base point G:
 
-Public base point G, group order n
+Pick random k
 
-Sign z with secret d:
-
-Choose random k
-
-Compute R = kG, r = R.x mod n
+Compute R = k·G, r = R.x mod n
 
 Compute s = k⁻¹ (z + r·d) mod n
 
-If the same k is reused for two messages (z₁, r, s₁) and (z₂, r, s₂), then:
+If the same k is reused for two messages (z₁, r, s₁) and (z₂, r, s₂), then
+k≡(z1​−z2​)(s1​−s2​)−1(modn)
+and
+d≡(s1​⋅k−z1​)r−1(modn).
+The script tries this recovery whenever it finds suitable pairs.
 
-𝑘
-≡
-(
-𝑧
-1
-−
-𝑧
-2
-)
-⋅
-(
-𝑠
-1
-−
-𝑠
-2
-)
-−
-1
-(
-m
-o
-d
-𝑛
-)
-k≡(z
-1
-	​
-
-−z
-2
-	​
-
-)⋅(s
-1
-	​
-
-−s
-2
-	​
-
-)
-−1
-(modn)
-
-and then:
-
-𝑑
-≡
-(
-𝑠
-1
-⋅
-𝑘
-−
-𝑧
-1
-)
-⋅
-𝑟
-−
-1
-(
-m
-o
-d
-𝑛
-)
-d≡(s
-1
-	​
-
-⋅k−z
-1
-	​
-
-)⋅r
-−1
-(modn)
-
-The script tries this recovery when it finds suitable pairs.
-
-2) Near-reuse (k1 ≈ k2)
+2) Near-reuse (k₁ ≈ k₂)
 
 If k₁ and k₂ are very close (e.g., share many leading bits), you often see very similar r.
 We detect candidates by Hamming distance:
+dist(r1​,r2​)=popcount(r1​⊕r2​)≤bitdiff.
+--bitdiff 4–8: strong indicator
 
-dist
-(
-𝑟
-1
-,
-𝑟
-2
-)
-=
-popcount
-(
-𝑟
-1
-⊕
-𝑟
-2
-)
-≤
-bitdiff
-dist(r
-1
-	​
+larger values (12–16+) yield more noise (false positives)
 
-,r
-2
-	​
-
-)=popcount(r
-1
-	​
-
-⊕r
-2
-	​
-
-)≤bitdiff
-
---bitdiff 4–8: very strong indicator
-
-larger values (12–16+) yield more noise (false positives).
-
-The script then tries the reuse-recovery formula anyway (best-effort heuristic).
-Full near-reuse attacks may require lattice/HNP methods — out of scope here by design (kept simple & fast).
+The script then tries the reuse-recovery formula anyway (simple heuristic).
+Full near-reuse/HNP lattice attacks are out of scope here (kept simple & fast).
 
 3) RNG sanity: LSB stats of r
 
@@ -259,19 +140,19 @@ python3 inteligentnyskrypt.py FILE [--sample F] [--maxpairs N] [--nearreuse] [--
 
 Arguments
 
-FILE — path to your signatures.txt.
+FILE — path to your signatures.txt
 
---sample F — take only a fraction of the file (0–1). Default: 1.0 (100%).
+--sample F — take only a fraction of the file (0–1). Default: 1.0 (100%)
 
---maxpairs N — cap max tested pairs per group (when very large). Default: big number.
+--maxpairs N — cap max tested pairs per owner when huge. Default: a large number
 
---nearreuse — enable near-reuse mode (checks similar r via Hamming distance).
+--nearreuse — enable near-reuse mode (checks similar r via Hamming distance)
 
---bitdiff B — Hamming threshold for near-reuse (default: 8).
+--bitdiff B — Hamming threshold for near-reuse (default: 8)
 
 Recommended combos
 
-# Quick scan on 10% of data, check near-reuse with tight threshold
+# Quick scan on 10% of data, near-reuse with tight threshold
 python3 inteligentnyskrypt.py signatures.txt --sample 0.10 --nearreuse --bitdiff 8
 
 # Full scan (can be heavy), allow up to 100k pairs per owner
@@ -303,42 +184,10 @@ If not, it still reports similar-r pairs (near-reuse candidates) and stats.
 
 📐 Math Appendix (Why Hamming on r?)
 
-r = x(k·G) mod n.
-For secp256k1, x(·) is nonlinear, but in practice when k values are very close (many shared MSBs), the resulting R = kG points — and their x-coordinates — can be correlated enough that Hamming distance on r is a cheap and effective heuristic filter.
+r = x(k·G) mod n. For secp256k1, x(·) is nonlinear, but in practice when k values are very close (many shared MSBs), the resulting points R = k·G — and their x-coordinates — can be similar enough that Hamming distance on r is a cheap and effective heuristic filter.
 
-Back-of-the-envelope probability: the chance that two random 256-bit numbers differ in ≤8 bits is
-
-∑
-𝑖
-=
-0
-8
-(
-256
-𝑖
-)
-/
-2
-256
-≈
-2
-−
-247
-i=0
-∑
-8
-	​
-
-(
-i
-256
-	​
-
-)/2
-256
-≈2
-−247
-
+Back-of-the-envelope probability: the chance that two random 256-bit numbers differ in ≤ 8 bits is
+i=0∑8​(i256​)2−256≈2−247.
 So if you see many pairs with bitdiff ≤ 8, it’s very unlikely to be random.
 
 🧠 Performance Tips
@@ -347,7 +196,7 @@ Use --sample on huge files (e.g., 0.1 or 0.25) to triage first.
 
 Keep --bitdiff small (e.g., 4–8) for precise near-reuse hits.
 
-Limit pairs per owner with --maxpairs to avoid quadratic explosion.
+Limit pairs per owner with --maxpairs to avoid quadratic blow-up.
 
 🔒 Legal & Safety Notice
 
@@ -358,11 +207,11 @@ No guarantees; use responsibly.
 
 🛠️ Troubleshooting
 
-“No valid signatures parsed”: check your file format; remove non-hex chars in r/s/z.
+“No valid signatures parsed” → check your file format; remove non-hex chars in r/s/z.
 
-“Killed / out of memory”: reduce --sample or --maxpairs.
+“Killed / out of memory” → reduce --sample or --maxpairs.
 
-“No results”: try --nearreuse --bitdiff 8, or scan a larger sample.
+“No results” → try --nearreuse --bitdiff 8, or scan a larger sample.
 
 📦 Minimal Project Structure
 .
@@ -372,4 +221,4 @@ No guarantees; use responsibly.
 
 📜 License
 
-MIT — see LICENSE (add one if you publish). 
+MIT — see LICENSE (add one if you publish).
